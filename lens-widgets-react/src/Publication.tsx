@@ -2,6 +2,7 @@ import {
   useEffect, useState
 } from 'react'
 import { css } from '@emotion/css'
+import { LensClient, development } from "@lens-protocol/client";
 import ReactMarkdown from 'react-markdown'
 import rehypeRaw from 'rehype-raw'
 import { ThemeColor, Theme } from './types'
@@ -27,32 +28,38 @@ export function Publication({
   theme = Theme.default,
   ipfsGateway,
   fontSize,
+  environment = 'PRODUCTION',
+  renderActButtonWithCTA,
+  onActButtonClick,
 }: {
   publicationId?: string,
   publicationData?: any,
   onClick?: () => void,
   theme?: Theme,
   ipfsGateway?: string,
-  fontSize?: string
+  fontSize?: string,
+  environment?: 'DEVELOPMENT' | 'PRODUCTION',
+  renderActButtonWithCTA?: string,
+  onActButtonClick?: () => void,
 }) {
   let [publication, setPublication] = useState<any>()
   let [showFullText, setShowFullText] = useState(false)
-  
+
   useEffect(() => {
     if (!publicationData) {
-      fetchPublication()
+      fetchPublication();
     } else {
       setPublication(publicationData)
     }
   }, [publicationId])
   async function fetchPublication() {
     try {
-      const { data } = await client
-        .query(getPublication, {
-          publicationId
-        })
-       .toPromise()
-       setPublication(data.publication)
+      // TODO: update for production after v2
+      const lensClient = new LensClient({
+        environment: environment === 'DEVELOPMENT' ? development : development
+      });
+      const pub = await lensClient.publication.fetch({ forId: publicationId });
+      setPublication(pub);
     } catch (err) {
       console.log('error fetching piublication: ', err)
     }
@@ -73,17 +80,20 @@ export function Publication({
     publication = publication.mirrorOf
     publication.original = original
   }
-  publication.profile = formatProfilePicture(publication.profile)
+  publication.profile = formatProfilePicture(publication.by)
   const { profile } = publication
 
   const isDarkTheme = theme === Theme.dark
   const color = isDarkTheme ? ThemeColor.white : ThemeColor.darkGray
   const backgroundColor = isDarkTheme ? ThemeColor.lightBlack : ThemeColor.white
-  const reactionBgColor = isDarkTheme ? ThemeColor.darkGray : ThemeColor.lightGray
+  const reactionBgColor = !renderActButtonWithCTA
+    ? (isDarkTheme ? ThemeColor.darkGray : ThemeColor.lightGray)
+    : ThemeColor.transparent;
+  const actButttonBgColor = isDarkTheme ? ThemeColor.darkGray : ThemeColor.lightGray;
   const reactionTextColor = isDarkTheme ? ThemeColor.lightGray : ThemeColor.darkGray
 
   let media, cover
-  if (publication.metadata.media.length) {
+  if (publication.metadata.media?.length) {
     media = publication.metadata.media[0]
     if (media && media.original) {
       if (
@@ -128,7 +138,7 @@ export function Publication({
             isMirror && (
               <div className={mirroredByContainerStyle}>
                 <MirrorIcon color={ThemeColor.mediumGray} />
-                <p>mirrored by {publication.original.profile.handle || publication.original.profile.name}</p>
+                <p>mirrored by {publication.original.profile.handle.localName || publication.original.profile.name}</p>
               </div>
             )
           }
@@ -151,7 +161,7 @@ export function Publication({
             }
           </div>
           <div className={profileDetailsContainerStyle(color)}>
-            <p className={profileNameStyle}>{profile.name || profile.handle}</p>
+            <p className={profileNameStyle}>{profile.name || profile.handle.localName}</p>
             <p className={dateStyle}> {formatDistance(new Date(publication.createdAt), new Date())}</p>
           </div>
         </div>
@@ -160,8 +170,8 @@ export function Publication({
           className={markdownStyle(color,fontSize)}
           rehypePlugins={[rehypeRaw]}
         >
-          {showFullText 
-            ? formatHandleColors(publication.metadata.content) 
+          {showFullText
+            ? formatHandleColors(publication.metadata.content)
             : formatHandleColors(getSubstring(publication.metadata.content, 339))}
         </ReactMarkdown>
         {publication.metadata.content.length > 339 && (
@@ -214,21 +224,31 @@ export function Publication({
       >
         <div className={reactionContainerStyle(reactionTextColor, reactionBgColor)}>
           <MessageIcon color={reactionTextColor} />
-          <p>{publication.stats.totalAmountOfComments}</p>
+          <p>{publication.stats.comments}</p>
         </div>
         <div className={reactionContainerStyle(reactionTextColor, reactionBgColor)}>
           <MirrorIcon color={reactionTextColor} />
-          <p>{publication.stats.totalAmountOfMirrors}</p>
+          <p>{publication.stats.mirrors + publication.stats.quotes}</p>
         </div>
         <div className={reactionContainerStyle(reactionTextColor, reactionBgColor)}>
           <HeartIcon color={reactionTextColor} />
-          <p>{publication.stats.totalUpvotes}</p>
+          <p>{publication.stats.upvoteReactions}</p>
         </div>
         {
-          publication.stats.totalAmountOfCollects > Number(0) && (
+          publication.stats.bookmarks > Number(0) && (
             <div className={reactionContainerStyle(reactionTextColor, reactionBgColor)}>
               <CollectIcon color={reactionTextColor} />
-              <p>{publication.stats.totalAmountOfCollects}</p>
+              <p>{publication.stats.bookmarks}</p>
+            </div>
+          )
+        }
+        {
+          renderActButtonWithCTA && (
+            <div
+              className={actButtontContainerStyle(reactionTextColor, actButttonBgColor)}
+              onClick={onActButtonClick}
+            >
+              <p>{renderActButtonWithCTA}</p>
             </div>
           )
         }
@@ -358,6 +378,21 @@ const reactionContainerStyle = (color, backgroundColor) => css`
     opacity: .75;
     margin: 0;
     margin-left: 4px;
+  }
+`
+
+const actButtontContainerStyle = (color, backgroundColor) => css`
+  background-color: ${backgroundColor};
+  display: flex;
+  border-radius: 16px;
+  padding: 10px;
+  margin-right: 10px;
+  right: 0;
+  p {
+    color: ${color};
+    font-size: 14px;
+    opacity: 1;
+    margin: 0;
   }
 `
 
