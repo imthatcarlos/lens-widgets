@@ -2,21 +2,22 @@ import {
   useEffect, useState
 } from 'react'
 import { css } from '@emotion/css'
+import { Environment, LensClient, development, production } from "@lens-protocol/client";
 import ReactMarkdown from 'react-markdown'
 import rehypeRaw from 'rehype-raw'
 import { ThemeColor, Theme } from './types'
 import { formatDistance } from 'date-fns'
 import {
-  MessageIcon, MirrorIcon, CollectIcon, HeartIcon
+  MessageIcon, MirrorIcon, CollectIcon, HeartIcon, ShareIcon
 } from './icons'
 import {
   formatProfilePicture,
   systemFonts,
   returnIpfsPathOrUrl,
   getSubstring,
-  formatHandleColors
+  formatHandleColors,
+  getDisplayName,
 } from './utils'
-import { client, getPublication } from './graphql'
 import ReactPlayer from 'react-player'
 import { AudioPlayer } from './AudioPlayer'
 
@@ -27,42 +28,62 @@ export function Publication({
   theme = Theme.default,
   ipfsGateway,
   fontSize,
+  environment = production,
+  isAuthenticated = false,
+  renderActButtonWithCTA,
+  onActButtonClick,
+  onCommentButtonClick,
+  onMirrorButtonClick,
+  onLikeButtonClick,
+  onShareButtonClick,
+  hideCommentButton = false,
+  hideQuoteButton = false,
+  hideShareButton = false,
 }: {
   publicationId?: string,
   publicationData?: any,
-  onClick?: () => void,
+  onClick?: (e) => void,
   theme?: Theme,
   ipfsGateway?: string,
-  fontSize?: string
+  fontSize?: string,
+  environment?: Environment,
+  isAuthenticated?: boolean,
+  renderActButtonWithCTA?: string,
+  onActButtonClick?: (e) => void,
+  onCommentButtonClick?: (e) => void,
+  onMirrorButtonClick?: (e) => void,
+  onLikeButtonClick?: (e, publicationId: string) => void,
+  onShareButtonClick?: (e) => void,
+  hideCommentButton?: boolean,
+  hideQuoteButton?: boolean,
+  hideShareButton?: boolean,
 }) {
   let [publication, setPublication] = useState<any>()
   let [showFullText, setShowFullText] = useState(false)
-  
+
   useEffect(() => {
     if (!publicationData) {
-      fetchPublication()
+      fetchPublication();
     } else {
       setPublication(publicationData)
     }
   }, [publicationId])
   async function fetchPublication() {
     try {
-      const { data } = await client
-        .query(getPublication, {
-          publicationId
-        })
-       .toPromise()
-       setPublication(data.publication)
+      const lensClient = new LensClient({ environment });
+      const pub = await lensClient.publication.fetch({ forId: publicationId });
+      setPublication(pub);
     } catch (err) {
       console.log('error fetching piublication: ', err)
     }
   }
-  function onPublicationPress() {
+  function onPublicationPress(e) {
     if (onClick) {
-      onClick()
+      onClick(e)
     } else {
-      const URI = `https://share.lens.xyz/p/${publicationId}`
-      window.open(URI, '_blank')
+      // const pubId = publicationId || publicationData.id;
+      // const URI = `https://share.lens.xyz/p/${pubId}`;
+      // window.open(URI, '_blank')
     }
   }
   if (!publication) return null
@@ -73,17 +94,18 @@ export function Publication({
     publication = publication.mirrorOf
     publication.original = original
   }
-  publication.profile = formatProfilePicture(publication.profile)
+  publication.profile = formatProfilePicture(publication.by)
   const { profile } = publication
 
   const isDarkTheme = theme === Theme.dark
   const color = isDarkTheme ? ThemeColor.white : ThemeColor.darkGray
   const backgroundColor = isDarkTheme ? ThemeColor.lightBlack : ThemeColor.white
-  const reactionBgColor = isDarkTheme ? ThemeColor.darkGray : ThemeColor.lightGray
+  const reactionBgColor = isDarkTheme ? ThemeColor.darkGray : ThemeColor.lightGray;
+  const actButttonBgColor = isDarkTheme ? ThemeColor.darkGray : ThemeColor.lightGray;
   const reactionTextColor = isDarkTheme ? ThemeColor.lightGray : ThemeColor.darkGray
 
   let media, cover
-  if (publication.metadata.media.length) {
+  if (publication.metadata.media?.length) {
     media = publication.metadata.media[0]
     if (media && media.original) {
       if (
@@ -118,7 +140,7 @@ export function Publication({
 
   return (
     <div
-      className={publicationContainerStyle(backgroundColor)}
+      className={publicationContainerStyle(backgroundColor, onClick ? true : false)}
     >
       <div
        onClick={onPublicationPress}
@@ -128,7 +150,7 @@ export function Publication({
             isMirror && (
               <div className={mirroredByContainerStyle}>
                 <MirrorIcon color={ThemeColor.mediumGray} />
-                <p>mirrored by {publication.original.profile.handle || publication.original.profile.name}</p>
+                <p>mirrored by {getDisplayName(publication.original.profile)}</p>
               </div>
             )
           }
@@ -151,19 +173,19 @@ export function Publication({
             }
           </div>
           <div className={profileDetailsContainerStyle(color)}>
-            <p className={profileNameStyle}>{profile.name || profile.handle}</p>
-            <p className={dateStyle}> {formatDistance(new Date(publication.createdAt), new Date())}</p>
+            <p className={profileNameStyle}>{getDisplayName(profile)}</p>
+            <p className={dateStyle}> {formatDistance(new Date(publication.createdAt), new Date())} ago</p>
           </div>
         </div>
         <div className={textContainerStyle}>
-        <ReactMarkdown
-          className={markdownStyle(color,fontSize)}
-          rehypePlugins={[rehypeRaw]}
-        >
-          {showFullText 
-            ? formatHandleColors(publication.metadata.content) 
-            : formatHandleColors(getSubstring(publication.metadata.content, 339))}
-        </ReactMarkdown>
+          <ReactMarkdown
+            className={markdownStyle(color,fontSize)}
+            rehypePlugins={[rehypeRaw]}
+          >
+            {showFullText
+              ? formatHandleColors(publication.metadata.content)
+              : formatHandleColors(getSubstring(publication.metadata.content, 339))}
+          </ReactMarkdown>
         {publication.metadata.content.length > 339 && (
           <button className={showMoreStyle} onClick={(event) => {
             event.stopPropagation()
@@ -212,23 +234,50 @@ export function Publication({
         className={reactionsContainerStyle}
         onClick={onPublicationPress}
       >
-        <div className={reactionContainerStyle(reactionTextColor, reactionBgColor)}>
-          <MessageIcon color={reactionTextColor} />
-          <p>{publication.stats.totalAmountOfComments}</p>
-        </div>
-        <div className={reactionContainerStyle(reactionTextColor, reactionBgColor)}>
-          <MirrorIcon color={reactionTextColor} />
-          <p>{publication.stats.totalAmountOfMirrors}</p>
-        </div>
-        <div className={reactionContainerStyle(reactionTextColor, reactionBgColor)}>
+        <div className={reactionContainerStyle(reactionTextColor, reactionBgColor, isAuthenticated)}>
           <HeartIcon color={reactionTextColor} />
-          <p>{publication.stats.totalUpvotes}</p>
+          <p>{publication.stats.upvoteReactions > 0 ? publication.stats.upvoteReactions : null}</p>
         </div>
+        {!hideCommentButton && (
+          <div
+            className={reactionContainerStyle(reactionTextColor, reactionBgColor, isAuthenticated)}
+            onClick={onCommentButtonClick}
+          >
+            <MessageIcon color={reactionTextColor} />
+            <p>{publication.stats.comments > 0 ? publication.stats.comments : null}</p>
+          </div>
+        )}
+        {!hideQuoteButton && (
+          <div className={reactionContainerStyle(reactionTextColor, reactionBgColor, isAuthenticated)}>
+            <MirrorIcon color={reactionTextColor} />
+            <p>{publication.stats.mirrors + publication.stats.quotes > 0 ? publication.stats.mirrors + publication.stats.quotes : null}</p>
+          </div>
+        )}
         {
-          publication.stats.totalAmountOfCollects > Number(0) && (
-            <div className={reactionContainerStyle(reactionTextColor, reactionBgColor)}>
+          publication.stats.bookmarks > Number(0) && (
+            <div className={reactionContainerStyle(reactionTextColor, reactionBgColor, isAuthenticated)}>
               <CollectIcon color={reactionTextColor} />
-              <p>{publication.stats.totalAmountOfCollects}</p>
+              <p>{publication.stats.bookmarks}</p>
+            </div>
+          )
+        }
+        {
+          renderActButtonWithCTA && (
+            <div
+              className={actButtonContainerStyle(reactionTextColor, actButttonBgColor)}
+              onClick={onActButtonClick}
+            >
+              <p>{renderActButtonWithCTA}</p>
+            </div>
+          )
+        }
+        {
+          !renderActButtonWithCTA && !hideShareButton && (
+            <div
+              className={shareContainerStyle(reactionTextColor, reactionBgColor)}
+              onClick={onShareButtonClick}
+            >
+              <ShareIcon color={reactionTextColor} />
             </div>
           )
         }
@@ -249,7 +298,7 @@ const showMoreStyle = css`
 `
 
 const textContainerStyle = css`
-  padding-top: 12px;
+  padding-top: 22px;
 `
 
 const topLevelContentStyle = css`
@@ -324,12 +373,15 @@ const profilePictureStyle = css`
 `
 
 const reactionsContainerStyle = css`
+  position: relative;
   padding: 0px 18px 18px;
   display: flex;
   flex-direction: row;
   justify-content: flex-start;
   align-items: center;
   margin-top: 15px;
+  gap: 10px;
+  cursor: default;
 `
 
 const mirroredByContainerStyle = css`
@@ -346,11 +398,14 @@ const mirroredByContainerStyle = css`
   }
 `
 
-const reactionContainerStyle = (color, backgroundColor) => css`
-  background-color: ${backgroundColor};
+const reactionContainerStyle = (color, backgroundColor, isAuthenticated) => css`
+  background-color: transparent;
+  &:hover {
+    background-color: ${isAuthenticated ? backgroundColor : 'transparent'};
+  }
   display: flex;
-  border-radius: 20px;
-  padding: 10px;
+  border-radius: 24px;
+  padding: 12px 16px 10px 16px;
   margin-right: 10px;
   p {
     color: ${color};
@@ -359,12 +414,52 @@ const reactionContainerStyle = (color, backgroundColor) => css`
     margin: 0;
     margin-left: 4px;
   }
+  cursor: ${isAuthenticated ? 'pointer' : 'default'};
 `
 
-const publicationContainerStyle = color => css`
+const shareContainerStyle = (color, backgroundColor) => css`
+  background-color: transparent;
+  &:hover {
+    background-color: ${backgroundColor}
+  }
+  display: flex;
+  border-radius: 24px;
+  padding: 12px 16px 10px 16px;
+  margin-right: 10px;
+  position: absolute;
+  right: 5px;
+  top: 0px;
+  p {
+    color: ${color};
+    font-size: 12px;
+    opacity: .75;
+    margin: 0;
+    margin-left: 4px;
+  }
+  cursor: pointer;
+`
+
+const actButtonContainerStyle = (color, backgroundColor) => css`
+  background-color: ${backgroundColor};
+  display: flex;
+  border-radius: 16px;
+  padding: 10px;
+  margin-right: 14px;
+  position: absolute;
+  right: 5px;
+  p {
+    color: ${color};
+    font-size: 14px;
+    opacity: 1;
+    margin: 0;
+  }
+  cursor: pointer;
+`
+
+const publicationContainerStyle = (color, onClick: boolean) => css`
   width: 510px;
   background-color: ${color};
-  cursor: pointer;
+  cursor: ${onClick ? 'pointer': 'default'};
   border-radius: 18px;
   @media (max-width: 510px) {
     width: 100%

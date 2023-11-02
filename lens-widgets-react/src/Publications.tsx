@@ -12,17 +12,33 @@ import { Theme } from './types'
 export function Publications({
   profileId,
   handle,
-  theme
+  theme,
+  publications,
+  isAuthenticated = false,
+  hideCommentButton = false,
+  hideQuoteButton = false,
+  hideShareButton = false,
+  onLikeButtonClick,
 } : {
   profileId?: string,
   handle?: string,
-  theme?: Theme
+  theme?: Theme,
+  publications?: any[],
+  isAuthenticated?: boolean,
+  hideCommentButton?: boolean,
+  hideQuoteButton?: boolean,
+  hideShareButton?: boolean,
+  onLikeButtonClick?: (e, publicationId: string) => void,
 }) {
-  const [publications, setPublications] = useState<any[] | undefined>([])
+  const [_publications, setPublications] = useState<any[] | undefined>([])
 
   useEffect(() => {
-    fetchPublications()
-  }, [profileId, handle])
+    if (!publications?.length) {
+      fetchPublications()
+    } else {
+      setPublications(publications)
+    }
+  }, [profileId, handle, publications])
 
   async function fetchPublications() {
     let id = profileId
@@ -66,6 +82,11 @@ export function Publications({
                 publicationData={publication}
                 publicationId={publication.id}
                 theme={theme}
+                isAuthenticated={isAuthenticated}
+                hideCommentButton={hideCommentButton}
+                hideQuoteButton={hideQuoteButton}
+                hideShareButton={hideShareButton}
+                onLikeButtonClick={(e) => { if(onLikeButtonClick) onLikeButtonClick(e, publication.id) }}
               />
             </div>
           )

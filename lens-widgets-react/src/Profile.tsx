@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { css } from '@emotion/css'
 import { Profile, ThemeColor, ProfileHandle, Theme } from './types'
+import { LensClient, ProfileFragment, development, production } from "@lens-protocol/client";
 import { client } from './graphql/client'
 import {
   profileById,
@@ -14,13 +15,15 @@ import {
   formatHandleColors,
   returnIpfsPathOrUrl,
   formatHandleList,
-  getSubstring
+  getSubstring,
+  getDisplayName,
 } from './utils'
 
 export function Profile({
   profileId,
+  profileData,
   ethereumAddress,
-  handle,
+  handle, // format: namespace/handle (handle.fullName) ex: lens/madfinance
   onClick,
   theme = Theme.default,
   containerStyle = profileContainerStyle,
@@ -28,11 +31,17 @@ export function Profile({
   followButtonContainerStyle,
   followButtonBackgroundColor,
   followButtonTextColor,
-  hideFollowButton,
+  hideFollowButton = true,
+  hideFollowerCount = false,
   ipfsGateway,
-  onFollowPress
+  onFollowPress,
+  skipFetchFollowers,
+  environment = production,
+  followButtonDisabled = false,
+  isFollowed = false,
 } : {
   profileId?: string,
+  profileData?: any,
   handle?: string,
   ethereumAddress?: string,
   onClick?: () => void,
@@ -43,8 +52,13 @@ export function Profile({
   followButtonBackgroundColor?: string,
   followButtonTextColor?: string,
   hideFollowButton?: boolean,
+  hideFollowerCount?: boolean,
   ipfsGateway?: string,
-  onFollowPress?: (event) => void
+  onFollowPress?: (event) => void,
+  skipFetchFollowers?: boolean,
+  environment?: (typeof development | typeof production),
+  followButtonDisabled: boolean,
+  isFollowed?: boolean
 }) {
   const [profile, setProfile] = useState<any | undefined>()
   const [followers, setFollowers] = useState<ProfileHandle[]>([])
@@ -58,85 +72,85 @@ export function Profile({
       onClick()
     } else {
        if (profile) {
-        const URI = `https://share.lens.xyz/u/${profile.handle}`
+        const URI = `https://share.lens.xyz/u/${profile.handle.localName}`
         window.open(URI, '_blank')
        }
     }
   }
 
   async function fetchFollowers(id: string) {
-    try {
-      const { data } = await client
-        .query(getFollowers, {
-          profileId: id
-        })
-       .toPromise()
+    if (skipFetchFollowers) return;
 
-      let filteredProfiles = data.followers.items.filter(p => p.wallet.defaultProfile.handle)
-      filteredProfiles = filteredProfiles.filter(p => p.wallet.defaultProfile.picture)
-      filteredProfiles = filteredProfiles.filter(p => p.wallet.defaultProfile.picture.original)
-      let first3 = JSON.parse(JSON.stringify(filteredProfiles.slice(0, 3)))
-      first3 = first3.map(profile => {
-        profile.handle = profile.wallet.defaultProfile.handle
-        profile.picture = returnIpfsPathOrUrl(profile.wallet.defaultProfile.picture.original.url, ipfsGateway)
-        return profile
-      })
-      setFollowers(first3)
+    try {
+      // TODO:
+      // const { data } = await client
+      //   .query(getFollowers, {
+      //     profileId: id
+      //   })
+      //  .toPromise()
+
+      // let filteredProfiles = data.followers.items.filter(p => p.wallet.defaultProfile.handle)
+      // filteredProfiles = filteredProfiles.filter(p => p.wallet.defaultProfile.picture)
+      // filteredProfiles = filteredProfiles.filter(p => p.wallet.defaultProfile.picture.original)
+      // let first3 = JSON.parse(JSON.stringify(filteredProfiles.slice(0, 3)))
+      // first3 = first3.map(profile => {
+      //   profile.handle = profile.wallet.defaultProfile.handle.localName
+      //   profile.picture = returnIpfsPathOrUrl(profile.wallet.defaultProfile.picture.original.url, ipfsGateway)
+      //   return profile
+      // })
+      // setFollowers(first3)
     } catch (err) {
       console.log('error fetching followers ...', err)
     }
   }
 
   async function fetchProfile() {
+    if (profileData) {
+      formatProfile(profileData)
+      fetchFollowers(profileData.id)
+    }
     if (!profileId && !ethereumAddress && !handle) {
       return console.log('please pass in either a Lens profile ID or an Ethereum address')
     }
+    const lensClient = new LensClient({ environment });
     if (handle) {
       try {
-        handle = handle.toLowerCase()
-        if (!handle.includes('.lens')) {
-          handle = handle + '.lens'
-        }
-        if (handle === 'lensprotocol.lens') {
-          handle = 'lensprotocol'
-        }
-        const { data } = await client
-          .query(profileByHandle, {
-            handle
-          })
-          .toPromise()
-        formatProfile(data.profile)
-        fetchFollowers(data.profile.id)
+        const profile = await lensClient.profile.fetch({ forHandle: handle });
+        if (!profile) throw new Error();
+
+        formatProfile(profile)
+        fetchFollowers(profile.id)
       } catch (err) {
         console.log('error fetching profile... ', err)
       }
     } else if (profileId) {
       try {
-        const { data } = await client
-          .query(profileById, {
-            profileId
-          })
-        .toPromise()
+        const profile = await lensClient.profile.fetch({ forProfileId: profileId })
+        if (!profile) throw new Error();
+
+        formatProfile(profile)
         fetchFollowers(profileId)
-        formatProfile(data.profile)
       } catch (err) {
         console.log('error fetching profile... ', err)
       }
     } else {
-      try {
-        const { data } = await client
-          .query(profileByAddress, {
-            address: ethereumAddress
-          })
-          .toPromise()
-        fetchFollowers(data.defaultProfile.id)
-        formatProfile(data.defaultProfile)
-      } catch (err) {
-        console.log('error fetching profile... ', err)
-      }
+      throw new Error('not supporting address yet');
+
+      // TODO:
+      // try {
+      //   const { data } = await client
+      //     .query(profileByAddress, {
+      //       address: ethereumAddress
+      //     })
+      //     .toPromise()
+      //   fetchFollowers(data.defaultProfile.id)
+      //   formatProfile(data.defaultProfile)
+      // } catch (err) {
+      //   console.log('error fetching profile... ', err)
+      // }
     }
   }
-  function formatProfile(profile: Profile) {
+  function formatProfile(profile: ProfileFragment) {
     let copy = formatProfilePicture(profile)
     setProfile(copy)
   }
@@ -147,27 +161,23 @@ export function Profile({
       <div className={headerImageContainerStyle}>
         <div onClick={onProfilePress}>
           {
-            profile.coverPicture?.__typename === 'MediaSet' ? (
+            profile.metadata.coverPicture ? (
               <div
-                style={getHeaderImageStyle(profile?.coverPicture?.original?.url)}
+                style={getHeaderImageStyle(profile.metadata.coverPicture.url)}
               />
               ) : <div style={getHeaderImageStyle()} />
           }
           <div>
           {
-            profile.picture?.__typename === 'MediaSet'
-            || profile.picture?.__typename ===  'NftImage'? (
-              <div
-                className={getProfilePictureContainerStyle(theme)}
-              >
-                <img
-                  src={
-                    profile.picture.__typename === 'NftImage' ?
-                    profile.picture.uri : profile.picture?.original?.url
-                  }
-                  className={profilePictureStyle}
-                />
-              </div>
+              profile.metadata.picture ? (
+                <div
+                  className={getProfilePictureContainerStyle(theme)}
+                >
+                  <img
+                    src={profile.metadata.picture.uri || profile.metadata.picture.url}
+                    className={profilePictureStyle}
+                  />
+                </div>
               ) : null
           }
           {
@@ -179,56 +189,97 @@ export function Profile({
         </div>
       </div>
       <div className={getProfileInfoContainerStyle(theme)}>
+        <div className={profileNameAndBioContainerStyle} onClick={onProfilePress}>
+          <p className={profileNameStyle}>{getDisplayName(profile)}</p>
+          {
+            profile.metadata?.bio && (
+              <p className={bioStyle} dangerouslySetInnerHTML={{
+                __html: formatHandleColors(getSubstring(profile.metadata.bio))
+              }} />
+            )
+          }
+        </div>
+        <div style={{ display: 'flex', justifyContent: 'space-between', paddingTop: '10px' }}>
+          <div onClick={onProfilePress} className={getStatsContainerStyle(theme)}>
+            <p>
+              {profile.stats.following.toLocaleString('en-US')} <span>Following</span>
+            </p>
+            <p>
+              {profile.stats.followers.toLocaleString('en-US')} <span>Followers</span>
+            </p>
+          </div>
           <div
             style={followButtonContainerStyle || getButtonContainerStyle(hideFollowButton)}
           >
             <button
+              disabled={followButtonDisabled || isFollowed}
               onClick={onFollowPress}
               style={
                 followButtonStyle ||
-                getButtonStyle(theme, followButtonBackgroundColor, followButtonTextColor)
+                getButtonStyle(
+                  theme,
+                  !followButtonDisabled ? followButtonBackgroundColor : ThemeColor.darkGray,
+                  followButtonTextColor,
+                  followButtonDisabled || isFollowed
+                )
               }
-            >Follow</button>
+            >{!isFollowed ? "Follow" : "Following"}</button>
           </div>
-          <div className={profileNameAndBioContainerStyle} onClick={onProfilePress}>
-            <p className={profileNameStyle}>{profile.name || profile.handle}</p>
-            {
-              profile.bio && (
-                <p className={bioStyle} dangerouslySetInnerHTML={{
-                  __html: formatHandleColors(getSubstring(profile.bio))
-                }} /> 
-              )
-            }
-          </div>
-        <div onClick={onProfilePress} className={getStatsContainerStyle(theme)}>
-          <p>
-            {profile.stats.totalFollowing.toLocaleString('en-US')} <span>Following</span> 
-          </p>
-          <p>
-            {profile.stats.totalFollowers.toLocaleString('en-US')} <span>Followers</span> 
-          </p>
         </div>
-        <div onClick={onProfilePress} className={getFollowedByContainerStyle(theme)}>
-          <div className={miniAvatarContainerStyle}>
-            {
-              followers.map(follower => (
-                <div key={follower.handle} className={getMiniAvatarWrapper()}>
-                  <img src={follower.picture} className={getMiniAvatarStyle(theme)} />
-                </div>
-              ))
-            }
+        {!skipFetchFollowers && (
+          <div onClick={onProfilePress} className={getFollowedByContainerStyle(theme)}>
+            <div className={miniAvatarContainerStyle}>
+              {
+                followers.map(follower => (
+                  <div key={follower.handle} className={getMiniAvatarWrapper()}>
+                    <img src={follower.picture} className={getMiniAvatarStyle(theme)} />
+                  </div>
+                ))
+              }
+            </div>
+            <p>
+              {
+                Boolean(followers.length) && <span>Followed by</span>
+              }
+              {
+                formatHandleList(followers.map(follower => follower.handle))
+              }</p>
           </div>
-          <p>
-          {
-            Boolean(followers.length) && <span>Followed by</span>
-          }
-          {
-            formatHandleList(followers.map(follower => follower.handle))
-          }</p>
-        </div>
+        )}
       </div>
     </div>
   )
+}
+
+export function ActionButton({
+  label,
+  disabled,
+  onClick,
+  theme,
+  textColor,
+  backgroundColor,
+}: {
+    label: string,
+    disabled: boolean,
+    onClick: (e) => void,
+    theme: Theme,
+    textColor?: string,
+    backgroundColor?: string,
+}) {
+  return (
+    <button
+      disabled={disabled}
+      onClick={onClick}
+      style={
+        getButtonStyle(
+          theme,
+          backgroundColor,
+          textColor,
+          disabled
+        )
+      }
+    >{label}</button>
+  );
 }
 
 const profileContainerStyle = {
@@ -243,8 +294,8 @@ const emptyProfilePictureStyle = css`
   display: flex;
   left: 0;
   bottom: -50px;
-  width: 138px;
-  height: 138px;
+  width: 66px;
+  height: 66px;
   border-radius: 70px;
   position: absolute;
   margin-left: 20px;
@@ -293,8 +344,8 @@ const miniAvatarContainerStyle = css`
 `
 
 const profilePictureStyle = css`
-  width: 128px;
-  height: 128px;
+  width: 62px;
+  height: 62px;
   border-radius: 70px;
 `
 
@@ -304,7 +355,6 @@ function getFollowedByContainerStyle(theme:Theme) {
     color = ThemeColor.white
   }
   return css`
-  margin-top: 20px;
   display: flex;
   color: ${color};
   align-items: center;
@@ -329,7 +379,7 @@ function getStatsContainerStyle(theme: Theme) {
   }
   return css`
     display: flex;
-    margin-top: 15px;
+    margin-top: 25px;
     * {
       font-weight: 600;
     }
@@ -359,7 +409,7 @@ function getProfileInfoContainerStyle(theme: Theme) {
   }
   return css`
     background-color: ${backgroundColor};
-    padding: 0px 20px 20px;
+    padding: 20px 20px 10px;
     p {
       color: ${color};
     }
@@ -400,7 +450,7 @@ function getMiniAvatarStyle(theme: Theme) {
     border-radius: 20px;
     outline: 2px solid ${color};
     background-color: ${color};
-  `  
+  `
 }
 
 function getProfilePictureContainerStyle(theme: Theme) {
@@ -414,10 +464,10 @@ function getProfilePictureContainerStyle(theme: Theme) {
     justify-content: center;
     align-items: center;
     left: 0;
-    bottom: -50px;
+    bottom: -30px;
     background-color: ${backgroundColor};
-    width: 138px;
-    height: 138px;
+    width: 66px;
+    height: 66px;
     border-radius: 70px;
     margin-left: 20px;
   `
@@ -426,7 +476,7 @@ function getProfilePictureContainerStyle(theme: Theme) {
 function getHeaderImageStyle(url?:string) {
   const backgroundImage = url ? `url(${url})` : 'none'
   return {
-    height: '245px',
+    height: '100px',
     backgroundColor: ThemeColor.lightGreen,
     backgroundSize: 'cover',
     backgroundPosition: 'center center',
@@ -437,23 +487,30 @@ function getHeaderImageStyle(url?:string) {
   }
 }
 
-function getButtonStyle(theme: Theme, bgColor?: string, textColor?: string) {
+function getButtonStyle(theme: Theme, bgColor?: string, textColor?: string, disabled?: boolean) {
   let backgroundColor = bgColor || '#3d4b41'
   let color = textColor || 'white'
   if (theme === Theme.dark) {
     color = textColor || '#191919'
     backgroundColor = bgColor || '#C3E4CD'
   }
+  let borderColor = bgColor == 'transparent'
+    ? ThemeColor.lightGray
+    : undefined
+  color = bgColor == 'transparent' ? ThemeColor.lightGray : color
   return {
     marginTop: '10px',
     outline: 'none',
     border: 'none',
-    padding: '10px 32px',
+    padding: '4px 16px',
     backgroundColor,
     borderRadius: '50px',
+    borderColor,
+    borderWidth: borderColor ? "1px" : undefined,
+    borderStyle: borderColor ? "solid" : undefined,
     color,
     fontSize: '16px',
     fontWeight: '500',
-    cursor: 'pointer'
+    cursor: disabled ? 'default' : 'pointer'
   }
 }
