@@ -2,13 +2,6 @@ import { useEffect, useState } from 'react'
 import { css } from '@emotion/css'
 import { Profile, ThemeColor, ProfileHandle, Theme } from './types'
 import { LensClient, ProfileFragment, development, production } from "@lens-protocol/client";
-import { client } from './graphql/client'
-import {
-  profileById,
-  profileByAddress,
-  getFollowers,
-  profileByHandle
-} from './graphql'
 import {
   formatProfilePicture,
   systemFonts,
@@ -23,7 +16,7 @@ export function Profile({
   profileId,
   profileData,
   ethereumAddress,
-  handle, // format: namespace/handle (handle.fullName) ex: lens/madfinance
+  handle, // ex: lens/madfinance
   onClick,
   theme = Theme.default,
   containerStyle = profileContainerStyle,
@@ -82,23 +75,17 @@ export function Profile({
     if (skipFetchFollowers) return;
 
     try {
-      // TODO:
-      // const { data } = await client
-      //   .query(getFollowers, {
-      //     profileId: id
-      //   })
-      //  .toPromise()
+      const lensClient = new LensClient({ environment })
+      const followers = await lensClient.profile.followers({ of: id })
 
-      // let filteredProfiles = data.followers.items.filter(p => p.wallet.defaultProfile.handle)
-      // filteredProfiles = filteredProfiles.filter(p => p.wallet.defaultProfile.picture)
-      // filteredProfiles = filteredProfiles.filter(p => p.wallet.defaultProfile.picture.original)
-      // let first3 = JSON.parse(JSON.stringify(filteredProfiles.slice(0, 3)))
-      // first3 = first3.map(profile => {
-      //   profile.handle = profile.wallet.defaultProfile.handle.localName
-      //   profile.picture = returnIpfsPathOrUrl(profile.wallet.defaultProfile.picture.original.url, ipfsGateway)
-      //   return profile
-      // })
-      // setFollowers(first3)
+      const filteredProfiles = followers.items.filter(p => p.metadata?.picture)
+      let first3 = JSON.parse(JSON.stringify(filteredProfiles.slice(0, 3)))
+      first3 = first3.map(profile => {
+        profile.handle = profile.handle.localName
+        profile.picture = returnIpfsPathOrUrl(profile.metadata.picture.optimized?.uri || profile.metadata.picture.raw?.uri, ipfsGateway)
+        return profile
+      })
+      setFollowers(first3)
     } catch (err) {
       console.log('error fetching followers ...', err)
     }
@@ -108,6 +95,7 @@ export function Profile({
     if (profileData) {
       formatProfile(profileData)
       fetchFollowers(profileData.id)
+      return;
     }
     if (!profileId && !ethereumAddress && !handle) {
       return console.log('please pass in either a Lens profile ID or an Ethereum address')
@@ -135,19 +123,6 @@ export function Profile({
       }
     } else {
       throw new Error('not supporting address yet');
-
-      // TODO:
-      // try {
-      //   const { data } = await client
-      //     .query(profileByAddress, {
-      //       address: ethereumAddress
-      //     })
-      //     .toPromise()
-      //   fetchFollowers(data.defaultProfile.id)
-      //   formatProfile(data.defaultProfile)
-      // } catch (err) {
-      //   console.log('error fetching profile... ', err)
-      // }
     }
   }
   function formatProfile(profile: ProfileFragment) {
@@ -231,7 +206,7 @@ export function Profile({
             <div className={miniAvatarContainerStyle}>
               {
                 followers.map(follower => (
-                  <div key={follower.handle} className={getMiniAvatarWrapper()}>
+                  <div key={follower.handle.localName} className={getMiniAvatarWrapper()}>
                     <img src={follower.picture} className={getMiniAvatarStyle(theme)} />
                   </div>
                 ))
@@ -242,7 +217,7 @@ export function Profile({
                 Boolean(followers.length) && <span>Followed by</span>
               }
               {
-                formatHandleList(followers.map(follower => follower.handle))
+                formatHandleList(followers.map(follower => follower.handle.suggestedFormatted.localName))
               }</p>
           </div>
         )}

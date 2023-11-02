@@ -150,7 +150,7 @@ export function Publication({
             isMirror && (
               <div className={mirroredByContainerStyle}>
                 <MirrorIcon color={ThemeColor.mediumGray} />
-                <p>mirrored by {getDisplayName(publication.original.profile)}</p>
+                <p>mirrored by {getDisplayName(publication.original.by)}</p>
               </div>
             )
           }
